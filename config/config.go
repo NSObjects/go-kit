@@ -99,6 +99,7 @@ type JWTConfig struct {
 	Secret    string        `mapstructure:"secret"`
 	Expire    time.Duration `mapstructure:"expire"`
 	SkipPaths []string      `mapstructure:"skip_paths"`
+	Enabled   bool          `mapstructure:"enabled"`
 }
 
 // CORSConfig contains CORS settings.
@@ -111,8 +112,11 @@ type CORSConfig struct {
 
 // CasbinConfig contains Casbin settings.
 type CasbinConfig struct {
-	Model     string `mapstructure:"model"`
-	ModelFile string `mapstructure:"model_file"`
+	Model      string   `mapstructure:"model"`
+	ModelFile  string   `mapstructure:"model_file"`
+	Enabled    bool     `mapstructure:"enabled"`
+	SkipPaths  []string `mapstructure:"skip_paths"`
+	AdminUsers []string `mapstructure:"admin_users"`
 }
 
 // BaseConfig is an alias for Config for backward compatibility.
