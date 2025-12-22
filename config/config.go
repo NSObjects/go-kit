@@ -25,6 +25,7 @@ type Config struct {
 	JWT     JWTConfig    `mapstructure:"jwt"`
 	CORS    CORSConfig   `mapstructure:"cors"`
 	Casbin  CasbinConfig `mapstructure:"casbin"`
+	Otel    OtelConfig   `mapstructure:"otel"`
 }
 
 // SystemConfig contains system-level settings.
@@ -117,6 +118,16 @@ type CasbinConfig struct {
 	Enabled    bool     `mapstructure:"enabled"`
 	SkipPaths  []string `mapstructure:"skip_paths"`
 	AdminUsers []string `mapstructure:"admin_users"`
+}
+
+// OtelConfig contains OpenTelemetry settings.
+type OtelConfig struct {
+	Enabled       bool    `mapstructure:"enabled"`        // 是否启用 OpenTelemetry
+	ServiceName   string  `mapstructure:"service_name"`   // 服务名称
+	Environment   string  `mapstructure:"environment"`    // 环境标识: dev, test, prod
+	OTLPEndpoint  string  `mapstructure:"otlp_endpoint"`  // OTLP gRPC 端点地址
+	ExporterType  string  `mapstructure:"exporter_type"`  // 导出器类型: otlp, stdout
+	SamplingRatio float64 `mapstructure:"sampling_ratio"` // 采样率: 0.0 - 1.0
 }
 
 // BaseConfig is an alias for Config for backward compatibility.
