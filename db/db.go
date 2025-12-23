@@ -15,13 +15,15 @@ import (
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
 	"gorm.io/driver/mysql"
+	"gorm.io/driver/postgres"
+	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
 )
 
 // Manager manages all database connections.
 type Manager struct {
-	MySQL   *gorm.DB
+	DB      *gorm.DB // Generic database connection (MySQL/PostgreSQL)
 	Redis   *redis.Client
 	MongoDB *mongo.Database
 	Config  *config.BaseConfig
@@ -32,13 +34,13 @@ type Manager struct {
 func NewManager(ctx context.Context, cfg config.BaseConfig) (*Manager, error) {
 	dm := &Manager{Config: &cfg}
 
-	// Initialize MySQL if configured
-	if cfg.Mysql.Host != "" {
-		db, err := NewMySQL(cfg.Mysql, os.Stdout)
+	// Initialize database if configured
+	if cfg.Database.Host != "" {
+		db, err := NewDatabase(cfg.Database, os.Stdout)
 		if err != nil {
-			return nil, fmt.Errorf("mysql init: %w", err)
+			return nil, fmt.Errorf("database init: %w", err)
 		}
-		dm.MySQL = db
+		dm.DB = db
 	}
 
 	// Initialize Redis if configured
@@ -60,11 +62,11 @@ func NewManager(ctx context.Context, cfg config.BaseConfig) (*Manager, error) {
 
 // Start checks connectivity of all databases.
 func (m *Manager) Start(ctx context.Context) error {
-	// Check MySQL
-	if m.MySQL != nil {
-		if sqlDB, err := m.MySQL.DB(); err == nil {
+	// Check database connection
+	if m.DB != nil {
+		if sqlDB, err := m.DB.DB(); err == nil {
 			if err := sqlDB.PingContext(ctx); err != nil {
-				return fmt.Errorf("mysql ping: %w", err)
+				return fmt.Errorf("database ping: %w", err)
 			}
 		}
 	}
@@ -83,11 +85,11 @@ func (m *Manager) Start(ctx context.Context) error {
 func (m *Manager) Stop(ctx context.Context) error {
 	var errs []error
 
-	// Close MySQL
-	if m.MySQL != nil {
-		if sqlDB, err := m.MySQL.DB(); err == nil {
+	// Close database connection
+	if m.DB != nil {
+		if sqlDB, err := m.DB.DB(); err == nil {
 			if err := sqlDB.Close(); err != nil {
-				errs = append(errs, fmt.Errorf("mysql close: %w", err))
+				errs = append(errs, fmt.Errorf("database close: %w", err))
 			}
 		}
 	}
@@ -109,11 +111,11 @@ func (m *Manager) Stop(ctx context.Context) error {
 func (m *Manager) Health(ctx context.Context) map[string]error {
 	health := make(map[string]error)
 
-	if m.MySQL != nil {
-		if sqlDB, err := m.MySQL.DB(); err == nil {
-			health["mysql"] = sqlDB.PingContext(ctx)
+	if m.DB != nil {
+		if sqlDB, err := m.DB.DB(); err == nil {
+			health["database"] = sqlDB.PingContext(ctx)
 		} else {
-			health["mysql"] = err
+			health["database"] = err
 		}
 	}
 
@@ -128,19 +130,19 @@ func (m *Manager) Health(ctx context.Context) map[string]error {
 	return health
 }
 
-// MySQLWithContext returns MySQL with context.
-func (m *Manager) MySQLWithContext(ctx context.Context) *gorm.DB {
-	if m.MySQL == nil {
+// DBWithContext returns the database connection with context.
+func (m *Manager) DBWithContext(ctx context.Context) *gorm.DB {
+	if m.DB == nil {
 		return nil
 	}
-	return m.MySQL.WithContext(ctx)
+	return m.DB.WithContext(ctx)
 }
 
 // IsEnabled checks if a component is enabled.
 func (m *Manager) IsEnabled(component string) bool {
 	switch component {
-	case "mysql":
-		return m.MySQL != nil
+	case "database", "mysql", "postgres":
+		return m.DB != nil
 	case "redis":
 		return m.Redis != nil
 	case "mongodb":
@@ -150,11 +152,50 @@ func (m *Manager) IsEnabled(component string) bool {
 	}
 }
 
-// NewMySQL creates a MySQL connection with connection pooling.
+// NewDialector creates a GORM dialector based on the driver type.
+func NewDialector(cfg config.DatabaseConfig) (gorm.Dialector, error) {
+	switch cfg.Driver {
+	case "mysql", "":
+		charset := cfg.Charset
+		if charset == "" {
+			charset = "utf8mb4"
+		}
+		loc := cfg.TimeZone
+		if loc == "" {
+			loc = "Local"
+		}
+		dsn := fmt.Sprintf("%s:%s@tcp(%s:%d)/%s?charset=%s&parseTime=true&loc=%s",
+			cfg.User, cfg.Password, cfg.Host, cfg.Port, cfg.Database, charset, loc)
+		return mysql.Open(dsn), nil
+	case "postgres":
+		sslMode := cfg.SSLMode
+		if sslMode == "" {
+			sslMode = "disable"
+		}
+		dsn := fmt.Sprintf("host=%s port=%d user=%s password=%s dbname=%s sslmode=%s",
+			cfg.Host, cfg.Port, cfg.User, cfg.Password, cfg.Database, sslMode)
+		if cfg.TimeZone != "" {
+			dsn += fmt.Sprintf(" TimeZone=%s", cfg.TimeZone)
+		}
+		if cfg.Schema != "" {
+			dsn += fmt.Sprintf(" search_path=%s", cfg.Schema)
+		}
+		return postgres.Open(dsn), nil
+	case "sqlite":
+		// SQLite uses Database field as file path (e.g., "test.db" or ":memory:")
+		return sqlite.Open(cfg.Database), nil
+	default:
+		return nil, fmt.Errorf("unsupported database driver: %s", cfg.Driver)
+	}
+}
+
+// NewDatabase creates a database connection with connection pooling.
 // logOutput is the writer for SQL logs (use io.Discard to suppress).
-func NewMySQL(cfg config.MysqlConfig, logOutput io.Writer) (*gorm.DB, error) {
-	dsn := fmt.Sprintf("%s:%s@tcp(%s:%d)/%s?charset=utf8mb4&parseTime=true&loc=Local",
-		cfg.User, cfg.Password, cfg.Host, cfg.Port, cfg.Dbname)
+func NewDatabase(cfg config.DatabaseConfig, logOutput io.Writer) (*gorm.DB, error) {
+	dialector, err := NewDialector(cfg)
+	if err != nil {
+		return nil, fmt.Errorf("create dialector: %w", err)
+	}
 
 	newLogger := logger.New(
 		log.New(logOutput, "\r\n", log.LstdFlags),
@@ -167,9 +208,9 @@ func NewMySQL(cfg config.MysqlConfig, logOutput io.Writer) (*gorm.DB, error) {
 		},
 	)
 
-	db, err := gorm.Open(mysql.Open(dsn), &gorm.Config{Logger: newLogger})
+	db, err := gorm.Open(dialector, &gorm.Config{Logger: newLogger})
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("open database: %w", err)
 	}
 
 	// Configure connection pool
@@ -180,7 +221,7 @@ func NewMySQL(cfg config.MysqlConfig, logOutput io.Writer) (*gorm.DB, error) {
 	return db, nil
 }
 
-func configurePool(sqlDB *sql.DB, cfg config.MysqlConfig) {
+func configurePool(sqlDB *sql.DB, cfg config.DatabaseConfig) {
 	if cfg.MaxOpenConns > 0 {
 		sqlDB.SetMaxOpenConns(cfg.MaxOpenConns)
 	}
@@ -191,6 +232,9 @@ func configurePool(sqlDB *sql.DB, cfg config.MysqlConfig) {
 		sqlDB.SetConnMaxLifetime(time.Duration(cfg.MaxLifetime) * time.Second)
 	} else {
 		sqlDB.SetConnMaxLifetime(5 * time.Minute)
+	}
+	if cfg.ConnMaxIdleTime > 0 {
+		sqlDB.SetConnMaxIdleTime(time.Duration(cfg.ConnMaxIdleTime) * time.Second)
 	}
 }
 

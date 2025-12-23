@@ -16,16 +16,16 @@ import (
 
 // Config is the main application configuration.
 type Config struct {
-	System  SystemConfig `mapstructure:"system"`
-	Mysql   MysqlConfig  `mapstructure:"mysql"`
-	Redis   RedisConfig  `mapstructure:"redis"`
-	Mongodb MongoConfig  `mapstructure:"mongodb"`
-	Kafka   KafkaConfig  `mapstructure:"kafka"`
-	Log     LogConfig    `mapstructure:"log"`
-	JWT     JWTConfig    `mapstructure:"jwt"`
-	CORS    CORSConfig   `mapstructure:"cors"`
-	Casbin  CasbinConfig `mapstructure:"casbin"`
-	Otel    OtelConfig   `mapstructure:"otel"`
+	System   SystemConfig   `mapstructure:"system"`
+	Database DatabaseConfig `mapstructure:"database"`
+	Redis    RedisConfig    `mapstructure:"redis"`
+	Mongodb  MongoConfig    `mapstructure:"mongodb"`
+	Kafka    KafkaConfig    `mapstructure:"kafka"`
+	Log      LogConfig      `mapstructure:"log"`
+	JWT      JWTConfig      `mapstructure:"jwt"`
+	CORS     CORSConfig     `mapstructure:"cors"`
+	Casbin   CasbinConfig   `mapstructure:"casbin"`
+	Otel     OtelConfig     `mapstructure:"otel"`
 }
 
 // SystemConfig contains system-level settings.
@@ -37,18 +37,29 @@ type SystemConfig struct {
 	Level   string `mapstructure:"level"`
 }
 
-// MysqlConfig contains MySQL connection settings.
-type MysqlConfig struct {
-	Host         string `mapstructure:"host"`
-	Port         int    `mapstructure:"port"`
-	User         string `mapstructure:"user"`
-	Password     string `mapstructure:"password"`
-	Dbname       string `mapstructure:"database"`
-	Database     string `mapstructure:"database"` // Alias for Dbname
-	DockerHost   string `mapstructure:"docker_host"`
-	MaxIdleConns int    `mapstructure:"max_idle_conns"`
-	MaxOpenConns int    `mapstructure:"max_open_conns"`
-	MaxLifetime  int    `mapstructure:"max_lifetime"`
+// DatabaseConfig contains database connection settings.
+// Supports mysql, postgres, and sqlite drivers.
+type DatabaseConfig struct {
+	Driver   string `mapstructure:"driver"`   // mysql, postgres, sqlite
+	Host     string `mapstructure:"host"`     // mysql/postgres: server host
+	Port     int    `mapstructure:"port"`     // mysql/postgres: server port
+	User     string `mapstructure:"user"`     // mysql/postgres: username
+	Password string `mapstructure:"password"` // mysql/postgres: password
+	Database string `mapstructure:"database"` // database name or sqlite file path
+
+	// MySQL specific
+	Charset string `mapstructure:"charset"` // mysql: character set (default: utf8mb4)
+
+	// PostgreSQL specific
+	SSLMode string `mapstructure:"ssl_mode"` // postgres: disable, require, verify-ca, verify-full
+	Schema  string `mapstructure:"schema"`   // postgres: search_path schema
+
+	// Common options
+	TimeZone        string `mapstructure:"timezone"`           // timezone for parsing time (e.g., "Asia/Shanghai", "Local")
+	MaxIdleConns    int    `mapstructure:"max_idle_conns"`     // max idle connections in pool
+	MaxOpenConns    int    `mapstructure:"max_open_conns"`     // max open connections in pool
+	MaxLifetime     int    `mapstructure:"max_lifetime"`       // max connection lifetime in seconds
+	ConnMaxIdleTime int    `mapstructure:"conn_max_idle_time"` // max connection idle time in seconds
 }
 
 // RedisConfig contains Redis connection settings.
